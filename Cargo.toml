@@ -1,0 +1,20 @@
+[package]
+name = "riverbed"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.92"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["full"] }
+tracing = "0.1.44"
+uuid = { version = "1.26.1", features = ["v4"] }
+
+[features]
+default = ["in-memory"]
+in-memory = []
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
