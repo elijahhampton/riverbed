@@ -1,6 +1,6 @@
 # riverbed
 
-An embeddable, distributed task queue for Rust, inspired by [Asynq](https://github.com/hibiken/asynq).
+An embeddable and high performance distributed task queue written in Rust.
 
 Riverbed runs inside your application. It can keep tasks in memory with no external services, or use a database for durable storage shared across many workers. The long-term goal is to be the fastest and most robust distributed task queue available in Rust. Every performance and reliability claim will be backed by published, reproducible benchmarks and fault-injection tests.
 
