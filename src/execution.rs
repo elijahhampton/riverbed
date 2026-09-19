@@ -2,11 +2,11 @@ use std::{
     collections::HashMap,
     error::Error,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use tokio::sync::Semaphore;
-use tracing::{Instrument, debug, error, instrument, warn};
+use tracing::{Instrument, debug, error, info, instrument, warn};
 
 use crate::{
     broker::TaskBroker,
@@ -40,7 +40,7 @@ pub(crate) struct Executor {
     /// at-least once in the case of a non-memory based broker.
     broker: Arc<dyn TaskBroker>,
     /// A mapping of task definitions to execution handlers.
-    handlers: HashMap<&'static str, Box<dyn THandler>>,
+    handlers: HashMap<String, Box<dyn THandler>>,
     retry_policy: RetryPolicy,
     concurrency: usize,
 }
@@ -48,7 +48,7 @@ pub(crate) struct Executor {
 impl Executor {
     pub(crate) fn new(
         broker: Arc<dyn TaskBroker>,
-        handlers: HashMap<&'static str, Box<dyn THandler>>,
+        handlers: HashMap<String, Box<dyn THandler>>,
         retry_policy: RetryPolicy,
         concurrency: usize,
     ) -> Self {
@@ -62,10 +62,13 @@ impl Executor {
 
     /// Claims and executes tasks forever with at most `concurrency` being executed.
     pub(crate) async fn run(self: Arc<Self>) {
-        debug!(
+        if self.handlers.is_empty() {
+            warn!("engine started with no task handlers registered; every task it picks up will fail");
+        }
+        info!(
             concurrency = self.concurrency,
-            handlers = self.handlers.len(),
-            "executor started"
+            task_types = ?self.handlers.keys().collect::<Vec<_>>(),
+            "engine started"
         );
         let permits = Arc::new(Semaphore::new(self.concurrency));
 
@@ -79,7 +82,11 @@ impl Executor {
             let task = match self.broker.claim().await {
                 Ok(task) => task,
                 Err(err) => {
-                    error!(error = &err as &dyn Error, "failed to claim task");
+                    error!(
+                        error = &err as &dyn Error,
+                        retry_in = ?CLAIM_ERROR_BACKOFF,
+                        "could not fetch the next task from the broker"
+                    );
                     tokio::time::sleep(CLAIM_ERROR_BACKOFF).await;
                     continue;
                 }
@@ -100,9 +107,12 @@ impl Executor {
         fields(task_id = %task.id, task_type = %task.definition, attempt = task.attempts + 1)
     )]
     async fn process(&self, task: Task) {
+        debug!("task started");
+        let started_at = Instant::now();
+
         let is_execution_recorded = match self.execute(&task).await {
             Ok(()) => {
-                debug!("task completed");
+                debug!(elapsed = ?started_at.elapsed(), "task completed");
                 self.broker.ack(task.id).await
             }
             Err(Failure::Permanent) => self.broker.fail(task.id).await,
@@ -110,7 +120,10 @@ impl Executor {
         };
 
         if let Err(err) = is_execution_recorded {
-            error!(error = &err as &dyn Error, "failed to record task outcome");
+            error!(
+                error = &err as &dyn Error,
+                "could not update the task's status in the broker"
+            );
         }
     }
 
@@ -118,7 +131,7 @@ impl Executor {
         let Some(handler) = self.handlers.get(task.definition.as_str()) else {
             // Failure to get a reference to a handler is a transient error and can be retried again.
             // Ex. In a mixed-version deployment another worker may have this handler.
-            error!("no handler registered for task type");
+            warn!("no handler registered for this task type");
             return Err(Failure::Transient);
         };
 
@@ -126,21 +139,23 @@ impl Executor {
             task_id: task.id,
             attempt: task.attempts + 1,
         };
-        let fut = handler.call(ctx, &task.payload).map_err(|err| {
-            error!(error = &err as &dyn Error, "invalid task payload");
+        let fut = handler.call(ctx, task.payload.clone()).map_err(|err| {
+            error!(
+                error = &err as &dyn Error,
+                "task payload does not match the handler's expected type; failing without retry"
+            );
             Failure::Permanent
         })?;
 
-        debug!("executing task");
         // A separate task turns a handler panic into a `JoinError` instead of unwinding past the ack.
         match tokio::spawn(fut.in_current_span()).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) => {
-                warn!(error = &*err as &dyn Error, "task handler failed");
+                warn!(error = &*err as &dyn Error, "task handler returned an error");
                 Err(Failure::Transient)
             }
             Err(err) => {
-                error!(error = &err as &dyn Error, "task handler terminated abnormally");
+                error!(error = &err as &dyn Error, "task handler panicked");
                 Err(Failure::Transient)
             }
         }
@@ -157,7 +172,7 @@ impl Executor {
         }
 
         let delay = self.retry_policy.backoff(attempt);
-        debug!(?delay, "scheduling task retry");
+        info!(retry_in = ?delay, "task will be retried");
         self.broker.retry(task.id, SystemTime::now() + delay).await
     }
 }

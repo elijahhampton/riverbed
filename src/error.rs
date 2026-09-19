@@ -10,7 +10,7 @@ pub enum CoreErr {
     #[error("no handler registered for task type `{0}`")]
     HandlerNotFound(TaskDefinition),
     #[error("a handler is already registered for task type `{0}`")]
-    DuplicateHandler(&'static str),
+    DuplicateHandler(String),
     #[error("failed to encode or decode task payload")]
     Payload(#[from] serde_json::Error),
     #[error("task handler failed")]

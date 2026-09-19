@@ -10,29 +10,24 @@ pub type TaskDefinition = String;
 /// A unique identifier per task.
 pub type TaskId = uuid::Uuid;
 
-pub trait TTask: Serialize + DeserializeOwned + Send + 'static {
-    const NAME: &'static str;
-}
-
 /// A task accepted by the task queue.
 #[derive(Debug, Clone)]
 pub struct Task {
     pub id: TaskId,
-    pub definition: TaskDefinition,
-    pub payload: Vec<u8>,
+    pub definition: String,
+    pub payload: serde_json::Value,
     pub attempts: u32,
     pub available_at: SystemTime,
 }
 
 impl Task {
-    pub fn new<T: TTask>(payload: &T) -> LibResult<Self> {
+    pub fn new(definition: String, payload: serde_json::Value) -> LibResult<Self> {
         Ok(Self {
             id: TaskId::new_v4(),
-            definition: T::NAME.to_owned(),
-            payload: serde_json::to_vec(payload)?,
+            definition,
+            payload,
             attempts: 0,
             available_at: SystemTime::now(),
         })
     }
 }
-

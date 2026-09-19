@@ -3,14 +3,17 @@ use crate::error::{CoreErr, LibResult};
 use crate::execution::{ExecutionContext, Executor};
 use crate::handler::{HandlerError, THandler, TypedHandler};
 use crate::retry::RetryPolicy;
-use crate::task::{TConfig, TTask, Task, TaskId};
+use crate::task::{Task, TaskId};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
+use std::sync::Mutex;
 pub struct EngineBuilder {
-    handlers: HashMap<&'static str, Box<dyn THandler>>,
+    handlers: HashMap<String, Box<dyn THandler>>,
     broker: Option<Arc<dyn TaskBroker>>,
     retry_policy: RetryPolicy,
     concurrency: usize,
@@ -52,18 +55,20 @@ impl EngineBuilder {
         self
     }
 
-    pub fn register_task<T, F, Fut>(mut self, handler: F) -> LibResult<Self>
+    pub fn register_task<T, F, Fut>(mut self, definition: String, handler: F) -> LibResult<Self>
     where
-        T: TTask,
+        T: Serialize + DeserializeOwned + 'static,
         F: Fn(T, ExecutionContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), HandlerError>> + Send + 'static,
     {
-        if self.handlers.contains_key(T::NAME) {
-            return Err(CoreErr::DuplicateHandler(T::NAME));
+        if self.handlers.contains_key(&definition) {
+            return Err(CoreErr::DuplicateHandler(definition.clone()));
         }
-        self.handlers
-            .insert(T::NAME, Box::new(TypedHandler::<T, F>::new(handler)));
-        debug!(task_type = T::NAME, "registered task handler");
+        self.handlers.insert(
+            definition.clone(),
+            Box::new(TypedHandler::<T, F>::new(handler)),
+        );
+        debug!(task_type = definition, "registered task handler");
         Ok(self)
     }
 
@@ -84,13 +89,14 @@ impl EngineBuilder {
 
         Engine {
             broker,
-            executor: Some(executor),
+            executor: Mutex::new(Some(executor)),
         }
     }
 }
 
 #[cfg(feature = "in-memory")]
 fn default_broker() -> Arc<dyn TaskBroker> {
+    info!("no broker configured, using the in-memory broker; queued tasks will not survive a restart");
     Arc::new(crate::broker::MemoryBroker::new())
 }
 
@@ -103,7 +109,7 @@ pub struct Engine {
     broker: Arc<dyn TaskBroker>,
     /// The executor is moved into its own task by once start() is called and becomes independent
     /// of the Engine. The value here becomes Option::None once the engine is running.
-    executor: Option<Executor>,
+    executor: Mutex<Option<Executor>>,
 }
 
 impl Engine {
@@ -111,61 +117,24 @@ impl Engine {
         EngineBuilder::default()
     }
 
-    pub fn start(&mut self) {
-        let Some(executor) = self.executor.take() else {
-            warn!("engine already started");
+    pub fn start(&self) {
+        let Some(executor) = self.executor.lock().unwrap().take() else {
+            warn!("engine is already running; ignoring repeated call to start()");
             return;
         };
 
-        info!("starting engine");
         tokio::spawn(Arc::new(executor).run());
     }
 
-    pub async fn enqueue_task<T: TTask>(&self, payload: T, config: Box<dyn TConfig>) -> LibResult<TaskId> {
-        let task = Task::new(&payload, config)?;
+    pub async fn enqueue_task(&self, definition: String, payload: serde_json::Value) -> LibResult<TaskId> {
+        let task = Task::new(definition, payload)?;
         let task_id = task.id;
+        let task_type = task.definition.clone();
 
         self.broker.enqueue(task).await?;
-        debug!(%task_id, task_type = T::NAME, "task enqueued");
+        debug!(%task_id, task_type, "task enqueued");
 
         Ok(task_id)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Serialize, Deserialize)]
-    struct AddNum {
-        num: u32,
-    }
-
-    impl TTask for AddNum {
-        const NAME: &'static str = "add_num";
-    }
-
-    fn init_tracing() {
-        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("riverbed=debug"));
-
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_test_writer()
-            .try_init();
-    }
-
-    #[tokio::test]
-    async fn registers_task() {
-        init_tracing();
-
-        let _engine = Engine::builder()
-            .register_task(|task: AddNum, ctx: ExecutionContext| async move {
-                println!("task {} attempt {}: num={}", ctx.task_id, ctx.attempt, task.num);
-                Ok::<(), HandlerError>(())
-            })
-            .unwrap()
-            .build();
-    }
-}

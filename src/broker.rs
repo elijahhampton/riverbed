@@ -5,8 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use std::time::SystemTime;
 
-/// Support for embeddable and in-memory task queues not relying on an external
-/// broker/db
+/// Support for  in-memory task queues.
 #[cfg(feature = "in-memory")]
 mod memory;
 #[cfg(feature = "in-memory")]
@@ -20,7 +19,6 @@ pub trait TaskBroker: Send + Sync {
     async fn enqueue(&self, task: Task) -> LibResult<()>;
 
     /// Waits until a task is due and leases it to the caller.
-    ///
     /// Must be cancel-safe: dropping the returned future must not lose a task.
     async fn claim(&self) -> LibResult<Task>;
 

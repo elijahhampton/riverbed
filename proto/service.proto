@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package riverbed.v1;
+
+service TaskService {
+  rpc EnqueueTask(EnqueueTaskRequest) returns (EnqueueTaskResponse);
+}
+
+message EnqueueTaskRequest {
+  // The task definition used to route the task to its handler, e.g. "process:transaction".
+  string category = 1;
+  // JSON-encoded task payload.
+  bytes payload = 2;
+}
+
+message EnqueueTaskResponse {
+  // UUID of the enqueued task.
+  string task_id = 1;
+}
