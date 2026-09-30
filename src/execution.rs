@@ -1,3 +1,5 @@
+//! Task execution.
+
 use std::{
     collections::HashMap,
     error::Error,
@@ -16,18 +18,21 @@ use crate::{
     task::{Task, TaskId},
 };
 
-/// Pause after a failed claim so an unavailable broker to 
+/// Pause after a failed claim so an unavailable broker to
 /// prevent polling in a hot loop.
 const CLAIM_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 
+/// Information about the current execution of a task, passed to its handler.
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
+    /// ID of the task being executed.
     pub task_id: TaskId,
+    /// Attempt number of this execution, starting at 1.
     pub attempt: u32,
 }
 
 enum Failure {
-    /// A permanent failure retrying cannot recover. 
+    /// A permanent failure retrying cannot recover.
     /// Ex. the payload does not decode.
     Permanent,
     /// A transient failure a retry may recover on later attempts.
@@ -63,7 +68,9 @@ impl Executor {
     /// Claims and executes tasks forever with at most `concurrency` being executed.
     pub(crate) async fn run(self: Arc<Self>) {
         if self.handlers.is_empty() {
-            warn!("engine started with no task handlers registered; every task it picks up will fail");
+            warn!(
+                "engine started with no task handlers registered; every task it picks up will fail"
+            );
         }
         info!(
             concurrency = self.concurrency,
@@ -151,7 +158,10 @@ impl Executor {
         match tokio::spawn(fut.in_current_span()).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) => {
-                warn!(error = &*err as &dyn Error, "task handler returned an error");
+                warn!(
+                    error = &*err as &dyn Error,
+                    "task handler returned an error"
+                );
                 Err(Failure::Transient)
             }
             Err(err) => {

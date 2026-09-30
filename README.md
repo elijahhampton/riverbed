@@ -1,5 +1,9 @@
 # riverbed
 
+[![CI](https://github.com/elijahhampton/riverbed/actions/workflows/ci.yml/badge.svg)](https://github.com/elijahhampton/riverbed/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![MSRV](https://img.shields.io/badge/rustc-1.88+-lightgray.svg)](Cargo.toml)
+
 An embeddable and high performance distributed task queue written in Rust.
 
 Riverbed runs inside your application. It can keep tasks in memory with no external services, or use a database for durable storage shared across many workers. The long-term goal is to be the fastest and most robust distributed task queue available in Rust. Every performance and reliability claim will be backed by published, reproducible benchmarks and fault-injection tests.
@@ -17,13 +21,22 @@ Early development. The API is unstable and not yet ready for production use. Riv
 - **Bounded concurrency**: a configurable limit on how many tasks run at once.
 - **Panic isolation**: a panicking handler fails its task, and the worker keeps running.
 - **Structured logging**: [`tracing`](https://docs.rs/tracing) spans carry `task_id`, `task_type`, and `attempt` into your handlers' logs.
+- **HTTP and gRPC APIs**: optional servers that let other services enqueue tasks.
 
 ## Quick start
 
-Requires Rust 1.85+ (edition 2024) and a [Tokio](https://tokio.rs) runtime.
+Requires Rust 1.88+ and a [Tokio](https://tokio.rs) runtime. Until the first release, depend on the Git repository:
+
+```toml
+[dependencies]
+riverbed = { git = "https://github.com/elijahhampton/riverbed" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+```
 
 ```rust
-use riverbed::{engine::Engine, execution::ExecutionContext, handler::HandlerError, task::TTask};
+use riverbed::{engine::Engine, execution::ExecutionContext, handler::HandlerError};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -32,24 +45,20 @@ struct SendEmail {
     to: String,
 }
 
-impl TTask for SendEmail {
-    const NAME: &'static str = "send_email";
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut engine = Engine::builder()
+    let engine = Engine::builder()
         .concurrency(8)
-        .register_task(|task: SendEmail, ctx: ExecutionContext| async move {
+        .register_task("email:send".into(), |task: SendEmail, ctx: ExecutionContext| async move {
             println!("attempt {}: emailing {}", ctx.attempt, task.to);
             Ok::<(), HandlerError>(())
         })?
         .build();
 
     engine.start();
-    engine
-        .enqueue_task(SendEmail { to: "user@example.com".into() })
-        .await?;
+
+    let payload = serde_json::to_value(SendEmail { to: "user@example.com".into() })?;
+    engine.enqueue_task("email:send".into(), payload).await?;
 
     // Keep the process alive long enough for the task to run.
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -57,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`TTask::NAME` identifies the task type in storage. Keep it stable across releases, because tasks enqueued by one version of your application may be processed by the next.
+The task type (`"email:send"` above) routes each task to its handler and is stored with the task. Keep it stable across releases, because tasks enqueued by one version of your application may be processed by the next.
 
 ## Configuration
 
@@ -126,11 +135,43 @@ tracing_subscriber::fmt()
 
 Each task runs inside a `task` span, so logs from your handlers automatically include `task_id`, `task_type`, and `attempt`.
 
+## HTTP and gRPC APIs
+
+Other services can enqueue tasks over HTTP or gRPC. Enable the `rest` feature, the `grpc` feature, or both, and serve the API from your engine:
+
+```rust
+let engine = Arc::new(engine);
+engine.start();
+
+riverbed::rest::server::serve(engine, "0.0.0.0:3000".parse()?).await?;
+```
+
+| API | Feature | Endpoint | Server |
+|---|---|---|---|
+| HTTP/JSON | `rest` | `POST /v1/task` with `{"category": "email:send", "payload": {...}}` | `rest::server::serve`, or `rest::server::router` to mount in an existing axum app |
+| gRPC | `grpc` | `riverbed.v1.TaskService/EnqueueTask`, defined in [`proto/service.proto`](proto/service.proto) | `grpc::server::serve`, or `grpc::server::GrpcTaskService` to mount in an existing tonic server |
+
+With both features enabled, pass clones of the same `Arc<Engine>` to each server. Building the `grpc` feature requires [`protoc`](https://protobuf.dev/installation/).
+
 ## Feature flags
 
 | Flag | Default | Description |
 |---|---|---|
 | `in-memory` | Yes | Enables `MemoryBroker` and uses it when no broker is configured |
+| `rest` | No | HTTP/JSON API for enqueuing tasks, built on [axum](https://docs.rs/axum) |
+| `grpc` | No | gRPC API for enqueuing tasks, built on [tonic](https://docs.rs/tonic). Requires `protoc` at build time |
+
+## Examples
+
+| Example | Command |
+|---|---|
+| [`basic`](examples/basic.rs): handlers, retries, and logging | `cargo run --example basic` |
+| [`rest_server`](examples/rest_server.rs): enqueue tasks over HTTP | `cargo run --example rest_server --features rest` |
+| [`grpc_server`](examples/grpc_server.rs): enqueue tasks over gRPC | `cargo run --example grpc_server --features grpc` |
+
+## Benchmarks
+
+`make bench` runs the [Criterion](https://github.com/criterion-rs/criterion.rs) benchmarks in [`benches/`](benches/), which cover the in-memory broker, end-to-end engine throughput, and payload size. See [CONTRIBUTING.md](CONTRIBUTING.md#benchmarks) for how to compare a change against a baseline.
 
 ## How it works
 
@@ -191,3 +232,18 @@ The executor reserves a concurrency slot *before* claiming, so a leased task nev
 
 - [ ] Metrics via OpenTelemetry: queue depth, latency, throughput, failure rate
 - [ ] CLI and web dashboard for inspecting and managing queues
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and pull request guidelines. Report security vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.

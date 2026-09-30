@@ -11,12 +11,12 @@ use std::{
 };
 use tokio::sync::Notify;
 
-/// The in-memory broker does not persist task being processed during a 
+/// The in-memory broker does not persist task being processed during a
 /// restart and permanently failed tasks are discarded.
 #[derive(Default)]
 pub struct MemoryBroker {
     state: Mutex<State>,
-    /// State signalling when `pending` changes. Claimers waiting to claim a 
+    /// State signalling when `pending` changes. Claimers waiting to claim a
     /// due task can recheck when the pending state updates.
     task_ready: Notify,
 }
@@ -24,33 +24,33 @@ pub struct MemoryBroker {
 /// Memory broker state holding any current pending task, in flight task and the next
 /// task sequence number.
 ///
-/// Pending task are keyed by due time and then by insertion order. Two task enqueued 
-/// within the same clock tick would collide when claimed and the second would silently 
-/// evict the first. This is an edge case but the insert order protects against it for 
-/// distributed systems which claim task arbitrarily. Equally due tasks are claimed 
+/// Pending task are keyed by due time and then by insertion order. Two task enqueued
+/// within the same clock tick would collide when claimed and the second would silently
+/// evict the first. This is an edge case but the insert order protects against it for
+/// distributed systems which claim task arbitrarily. Equally due tasks are claimed
 /// first in first out.
 ///
 /// Alternatives to the insertion key:
-/// - BTreeMap<SystemTime, Vec<Task>> Groups naturally but every operation has to handle 
+/// - BTreeMap<SystemTime, Vec<Task>> Groups naturally but every operation has to handle
 /// the empty-bucket case and you still need the vector for order.
 ///
-/// - (SystemTime, TaskId) Unique so nothing gets lost, but UUIDs are random so tasks 
-/// with the same due time run in arbitrary order. Although, UUIDv7 would sort by time 
+/// - (SystemTime, TaskId) Unique so nothing gets lost, but UUIDs are random so tasks
+/// with the same due time run in arbitrary order. Although, UUIDv7 would sort by time
 /// and could serve as both an ID and a tie-breaker.
 ///
-/// - BinaryHeap<Reverse<(SystemTime, u64, Task)>> Performing peek() becomes O(1) 
-/// instead of O(log n), with better constrants, but it would still need the 
-/// counter, because heap order among equal keys is unspecified. This method loses 
+/// - BinaryHeap<Reverse<(SystemTime, u64, Task)>> Performing peek() becomes O(1)
+/// instead of O(log n), with better constrants, but it would still need the
+/// counter, because heap order among equal keys is unspecified. This method loses
 /// range queries and removal by key.
 ///
 /// Alternatives to the mapping data structure:
 /// The BTreeMap costs slightly more per claim() but keeps two doors open:
-/// 1. Batch claiming becomes range(..=now), taking everything due in one lock 
-/// acquisiton rather than one round per task. A heap can do this by popping 
+/// 1. Batch claiming becomes range(..=now), taking everything due in one lock
+/// acquisiton rather than one round per task. A heap can do this by popping
 /// repeatedly, but only from the front, which might constrain flexibility in the implementation.
 ///
-/// 2. Cancellation and deduplication need removing or finding a specific 
-/// pending task. A BinaryHeap can't remove from the middle so you'd need lazy deletion, 
+/// 2. Cancellation and deduplication need removing or finding a specific
+/// pending task. A BinaryHeap can't remove from the middle so you'd need lazy deletion,
 /// keeping a reference set and discarding stale entries on pop.
 #[derive(Default)]
 struct State {
@@ -74,6 +74,7 @@ impl State {
 }
 
 impl MemoryBroker {
+    /// Creates an empty broker.
     pub fn new() -> Self {
         Self::default()
     }
@@ -82,7 +83,7 @@ impl MemoryBroker {
         self.state.lock().expect("memory broker lock poisoned")
     }
 
-    /// Leases the earliest due task or returns when the earliest 
+    /// Leases the earliest due task or returns when the earliest
     /// pending task becomes due
     fn try_claim(&self) -> Result<Task, Option<SystemTime>> {
         let mut guard = self.state();
@@ -116,7 +117,9 @@ impl TaskBroker for MemoryBroker {
             match self.try_claim() {
                 Ok(task) => return Ok(task),
                 Err(Some(available_at)) => {
-                    let delay = available_at.duration_since(SystemTime::now()).unwrap_or_default();
+                    let delay = available_at
+                        .duration_since(SystemTime::now())
+                        .unwrap_or_default();
                     tokio::select! {
                         _ = self.task_ready.notified() => {}
                         _ = tokio::time::sleep(delay) => {}

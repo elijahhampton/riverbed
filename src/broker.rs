@@ -1,3 +1,5 @@
+//! Storage backends for tasks.
+
 use crate::{
     error::LibResult,
     task::{Task, TaskId},

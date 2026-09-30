@@ -1,3 +1,5 @@
+//! Task handler types.
+
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{error::LibResult, execution::ExecutionContext};
@@ -36,4 +38,8 @@ where
     }
 }
 
+/// Error returned by a task handler.
+///
+/// Handler errors are treated as transient: the task is retried until its
+/// [`RetryPolicy`](crate::retry::RetryPolicy) allows no more attempts.
 pub type HandlerError = Box<dyn Error + Send + Sync>;

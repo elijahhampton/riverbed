@@ -1,1 +1,8 @@
 /target
+
+# Profiler output. Criterion writes benchmark results and reports under /target/criterion.
+perf.data*
+flamegraph.svg
+cargo-flamegraph.trace
+*.trace
+dhat-*.json

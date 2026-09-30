@@ -1,5 +1,10 @@
+//! Retry policy for failed tasks.
+
 use std::time::Duration;
 
+/// Retry limit and exponential backoff for failed tasks.
+///
+/// The default allows 5 attempts, with delays starting at 1 second and capped at 5 minutes.
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
     /// Total attempts allowed, including the first.

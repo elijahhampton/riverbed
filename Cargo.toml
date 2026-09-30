@@ -2,6 +2,26 @@
 name = "riverbed"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "An embeddable task queue for async Rust with pluggable storage backends"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/elijahhampton/riverbed"
+keywords = ["task-queue", "job-queue", "background-jobs", "worker", "async"]
+categories = ["asynchronous", "concurrency"]
+include = [
+    "/build.rs",
+    "/examples",
+    "/proto",
+    "/src",
+    "/CHANGELOG.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+    "/README.md",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 async-trait = "0.1.92"
@@ -18,13 +38,49 @@ tracing = "0.1.44"
 uuid = { version = "1.26.1", features = ["serde", "v4"] }
 
 [features]
-default = ["in-memory", "rest-api"]
+default = ["in-memory"]
 in-memory = []
-rest-api = ["dep:axum"]
+rest = ["dep:axum"]
 grpc = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:tonic-prost-build"]
 
 [dev-dependencies]
+criterion = { version = "0.8.2", features = ["async_tokio", "html_reports"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [build-dependencies]
 tonic-prost-build = { version = "0.14.6", optional = true }
+
+[[example]]
+name = "basic"
+required-features = ["in-memory"]
+
+[[example]]
+name = "rest_server"
+required-features = ["in-memory", "rest"]
+
+[[example]]
+name = "grpc_server"
+required-features = ["in-memory", "grpc"]
+
+[[bench]]
+name = "broker"
+harness = false
+required-features = ["in-memory"]
+
+[[bench]]
+name = "engine"
+harness = false
+required-features = ["in-memory"]
+
+[[bench]]
+name = "payload"
+harness = false
+required-features = ["in-memory"]
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"

@@ -1,0 +1,47 @@
+name: Bug report
+description: Report incorrect or unexpected behavior
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: A minimal code sample or sequence of steps that reproduces the problem.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Riverbed version
+      description: The crate version or commit SHA.
+    validations:
+      required: true
+  - type: input
+    id: features
+    attributes:
+      label: Enabled features
+      placeholder: in-memory, rest
+  - type: input
+    id: rustc
+    attributes:
+      label: Rust version
+      description: The output of `rustc --version`.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log output, at `debug` level for the `riverbed` target if possible.
+      render: text

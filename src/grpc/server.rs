@@ -1,3 +1,5 @@
+//! gRPC server for the task service.
+
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -10,15 +12,20 @@ use crate::error::CoreErr;
 use crate::grpc::proto::task_service_server::{TaskService, TaskServiceServer};
 use crate::grpc::proto::{EnqueueTaskRequest, EnqueueTaskResponse};
 
+/// Implementation of `riverbed.v1.TaskService` that enqueues tasks into an [`Engine`].
+///
+/// Use this to mount the service in an existing tonic server. Otherwise, use [`serve`].
 pub struct GrpcTaskService {
     engine: Arc<Engine>,
 }
 
 impl GrpcTaskService {
+    /// Creates a service that enqueues tasks into `engine`.
     pub fn new(engine: Arc<Engine>) -> Self {
         Self { engine }
     }
 
+    /// Wraps the service so it can be added to a [`tonic::transport::Server`].
     pub fn into_server(self) -> TaskServiceServer<Self> {
         TaskServiceServer::new(self)
     }
@@ -32,7 +39,10 @@ impl TaskService for GrpcTaskService {
     ) -> Result<Response<EnqueueTaskResponse>, Status> {
         let EnqueueTaskRequest { category, payload } = request.into_inner();
         let payload = serde_json::from_slice(&payload).map_err(|err| {
-            debug!(error = &err as &dyn Error, "rejected task: payload is not valid JSON");
+            debug!(
+                error = &err as &dyn Error,
+                "rejected task: payload is not valid JSON"
+            );
             Status::invalid_argument(format!("payload is not valid JSON: {err}"))
         })?;
 
