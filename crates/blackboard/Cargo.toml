@@ -1,0 +1,15 @@
+[package]
+name = "blackboard"
+version = "0.1.0"
+description = "A runtime that coordinates durable units of work across interchangeable workers"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+riverbed.workspace = true
+
+[lints]
+workspace = true

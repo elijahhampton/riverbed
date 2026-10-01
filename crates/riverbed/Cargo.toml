@@ -1,0 +1,81 @@
+[package]
+name = "riverbed"
+version = "0.1.0"
+description = "An embeddable task queue for async Rust with pluggable storage backends"
+keywords = ["task-queue", "job-queue", "background-jobs", "worker", "async"]
+categories = ["asynchronous", "concurrency"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+include = [
+    "/build.rs",
+    "/examples",
+    "/proto",
+    "/src",
+    "/CHANGELOG.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+    "/README.md",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+async-trait.workspace = true
+axum = { workspace = true, optional = true }
+prost = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tonic = { workspace = true, optional = true }
+tonic-prost = { workspace = true, optional = true }
+tracing.workspace = true
+uuid.workspace = true
+
+[features]
+default = ["in-memory"]
+in-memory = []
+rest = ["dep:axum"]
+grpc = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:tonic-prost-build"]
+
+[dev-dependencies]
+criterion.workspace = true
+tracing-subscriber.workspace = true
+
+[build-dependencies]
+tonic-prost-build = { workspace = true, optional = true }
+
+[[example]]
+name = "basic"
+required-features = ["in-memory"]
+
+[[example]]
+name = "rest_server"
+required-features = ["in-memory", "rest"]
+
+[[example]]
+name = "grpc_server"
+required-features = ["in-memory", "grpc"]
+
+[[bench]]
+name = "broker"
+harness = false
+required-features = ["in-memory"]
+
+[[bench]]
+name = "engine"
+harness = false
+required-features = ["in-memory"]
+
+[[bench]]
+name = "payload"
+harness = false
+required-features = ["in-memory"]
+
+
+[lints]
+workspace = true
