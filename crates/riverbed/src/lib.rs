@@ -39,8 +39,13 @@
 //! Tasks are delivered at least once. A task can run more than once, for example when it is
 //! retried after its handler fails partway through, so handlers should be idempotent.
 //!
+//! A claimed task is held under a [`Lease`](lease::Lease) that expires, so a task whose worker
+//! disappears is recovered and granted to another. The lease carries a token, and the broker
+//! rejects an outcome recorded by a holder whose lease has since been reclaimed.
+//!
 //! # Feature flags
 //!
+//! - `testing`: the broker conformance suites. See [`testing`].
 //! - `in-memory` (default): enables [`MemoryBroker`](broker::MemoryBroker), which the engine uses
 //!   when no broker is configured. Tasks do not survive a restart.
 //! - `rest`: an HTTP/JSON API for enqueuing tasks. See [`rest`].
@@ -57,9 +62,15 @@ pub mod rest;
 pub mod grpc;
 
 pub mod broker;
+pub mod completion;
 pub mod engine;
 pub mod error;
 pub mod execution;
 pub mod handler;
+pub mod lease;
 pub mod retry;
 pub mod task;
+
+#[cfg(feature = "testing")]
+#[cfg_attr(docsrs, doc(cfg(feature = "testing")))]
+pub mod testing;

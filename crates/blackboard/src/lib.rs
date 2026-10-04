@@ -6,3 +6,7 @@
 //!
 //! Nothing is implemented yet. See `AI_WORK_RUNTIME_SPEC.md` for the phased plan. This crate holds
 //! the work store, context assembly, and worker pools, and depends on [`riverbed`] for scheduling.
+
+// A sketch, not yet wired to anything. See Phase 2 of the spec.
+#[allow(dead_code)]
+mod worker;

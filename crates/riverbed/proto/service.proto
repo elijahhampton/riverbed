@@ -4,6 +4,7 @@ package riverbed.v1;
 
 service TaskService {
   rpc EnqueueTask(EnqueueTaskRequest) returns (EnqueueTaskResponse);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
 }
 
 message EnqueueTaskRequest {
@@ -11,9 +12,40 @@ message EnqueueTaskRequest {
   string category = 1;
   // JSON-encoded task payload.
   bytes payload = 2;
+  // Queue the task is claimed from. Empty means the default queue.
+  string queue = 3;
+  // Attempt limit for this task. Zero means the engine's default.
+  uint32 max_attempts = 4;
+  // Key that makes enqueueing idempotent. Empty means no deduplication.
+  string dedup_key = 5;
 }
 
 message EnqueueTaskResponse {
   // UUID of the enqueued task.
   string task_id = 1;
+}
+
+message GetTaskRequest {
+  // UUID of the task to look up.
+  string task_id = 1;
+}
+
+message GetTaskResponse {
+  string task_id = 1;
+  string category = 2;
+  string queue = 3;
+  // One of "pending", "leased", "completed", "failed".
+  string state = 4;
+  uint32 attempts = 5;
+  uint32 reclaims = 6;
+  // JSON-encoded result stored by a successful completion, empty when there is none.
+  bytes result = 7;
+  // Why the task failed, absent when it has not.
+  TaskFailure failure = 8;
+}
+
+message TaskFailure {
+  string kind = 1;
+  string detail = 2;
+  uint32 attempts = 3;
 }

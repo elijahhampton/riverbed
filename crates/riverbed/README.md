@@ -15,11 +15,18 @@ Early development. The API is unstable and not yet ready for production use. Riv
 ## Features
 
 - **Typed tasks**: handlers receive strongly typed, deserialized payloads.
+- **Queues**: each queue is served by its own pool with its own concurrency, so a slow queue cannot starve a fast one.
+- **Results and follow-up work**: a handler can return a result to store and tasks to enqueue, committed with the acknowledgement.
+- **Cancellation and timeouts**: handlers receive a cancellation signal, fired on shutdown and when a task runs past its timeout.
+- **Deduplication**: a task carrying a dedup key an unfinished task already holds is not created twice.
+- **Inspection**: look up a task's state, result, or failure reason, and requeue a failed one.
 - **Pluggable brokers**: storage sits behind the `TaskBroker` trait, and an in-memory broker ships by default.
 - **Delayed execution**: tasks become claimable at a scheduled time.
 - **Retries**: failed tasks are retried with exponential backoff, up to a configurable limit.
 - **Bounded concurrency**: a configurable limit on how many tasks run at once.
 - **Panic isolation**: a panicking handler fails its task, and the worker keeps running.
+- **Leases with fencing**: a task whose worker disappears is recovered, and the vanished worker cannot overwrite the outcome of the one that replaced it.
+- **Graceful shutdown**: `Engine::shutdown` stops claiming and drains in-flight tasks, returning any lease still held.
 - **Structured logging**: [`tracing`](https://docs.rs/tracing) spans carry `task_id`, `task_type`, and `attempt` into your handlers' logs.
 - **HTTP and gRPC APIs**: optional servers that let other services enqueue tasks.
 
@@ -80,6 +87,7 @@ let engine = Engine::builder()
         max_attempts: 10,
         base_delay: Duration::from_millis(500),
         max_delay: Duration::from_secs(60),
+        jitter: true,
     })
     // .broker(MyPostgresBroker::new(pool))
     .build();
@@ -90,6 +98,8 @@ let engine = Engine::builder()
 | `concurrency` | Number of CPUs | Maximum number of tasks executing at once |
 | `retry_policy` | 5 attempts, 1s base delay, 5m cap | Retry limit and exponential backoff |
 | `broker` | `MemoryBroker` | Storage backend |
+| `queue_concurrency` | `concurrency` | Per-queue override of the concurrency limit |
+| `task_timeout` | None | Default time one execution may run before it is cancelled |
 
 ## Delivery semantics
 
@@ -99,10 +109,13 @@ A task's outcome depends on how its handler ends:
 
 | Handler outcome | Result |
 |---|---|
-| Returns `Ok(())` | Task is acknowledged and removed |
+| Returns `Ok(())` or a `Completion` | Task is acknowledged; any result is stored and any spawned tasks enqueued, in one operation |
 | Returns `Err(_)` or panics | Task is retried with backoff until `max_attempts` is reached, then permanently failed |
+| Its worker disappears | The lease expires and the task is claimed again. This counts a reclaim, not an attempt, so the retry budget is untouched |
 | Payload fails to deserialize | Task is permanently failed without retrying, because retrying cannot fix it |
 | No handler registered for the task type | Task is retried, so that a worker running a newer version can pick it up during a rolling deploy |
+| Observes cancellation and returns `Err(_)` | Task is released back to the queue with no attempt consumed |
+| Runs past its timeout | Task is cancelled and the attempt is consumed, then retried or failed with a `Timeout` reason |
 
 The in-memory broker does not persist tasks. Pending tasks are lost when the process exits.
 
@@ -113,15 +126,33 @@ Implement `TaskBroker` to store tasks anywhere:
 ```rust
 #[async_trait]
 pub trait TaskBroker: Send + Sync {
-    async fn enqueue(&self, task: Task) -> LibResult<()>;
-    async fn claim(&self) -> LibResult<Task>;
-    async fn ack(&self, task_id: TaskId) -> LibResult<()>;
-    async fn retry(&self, task_id: TaskId, available_at: SystemTime) -> LibResult<()>;
-    async fn fail(&self, task_id: TaskId) -> LibResult<()>;
+    async fn enqueue(&self, spec: TaskSpec) -> LibResult<TaskId>;
+    async fn claim(&self, filter: &ClaimFilter) -> LibResult<Lease>;
+    async fn heartbeat(&self, lease: &Lease) -> LibResult<SystemTime>;
+    async fn ack(&self, lease: &Lease, completion: Completion) -> LibResult<()>;
+    async fn retry(&self, lease: &Lease, available_at: SystemTime) -> LibResult<()>;
+    async fn release(&self, lease: &Lease) -> LibResult<()>;
+    async fn fail(&self, lease: &Lease, failure: FailureRecord) -> LibResult<()>;
 }
 ```
 
+Inspection sits behind a second trait, `TaskStore` (`get`, `list`, `requeue`), because a backend can
+be written to without being queryable and reads never touch the execution path.
+
 `claim` waits until a task is due and leases it to the caller. It must be cancel-safe: dropping the future must never lose a task.
+
+A lease expires, so a task whose worker disappears is handed to another one. Because two workers can
+then be running the same task, every method that records an outcome takes the `Lease` rather than an
+id: it carries a token, and a broker rejects one that is no longer current. An executor calls
+`heartbeat` while its handler runs to hold the lease open.
+
+Run the shared conformance suites against your backend to check it behaves like the others:
+
+```rust
+# // Enable the `testing` feature.
+riverbed::testing::Conformance::new(|| MyBroker::new()).run().await;
+riverbed::testing::StoreConformance::new(|| MyBroker::new()).run().await;
+```
 
 ## Observability
 
@@ -193,25 +224,25 @@ The executor reserves a concurrency slot *before* claiming, so a leased task nev
 - [x] Retries with exponential backoff
 - [x] Panic isolation
 - [x] `tracing` instrumentation
-- [ ] Graceful shutdown that drains in-flight tasks
-- [ ] `enqueue_in` / `enqueue_at` for scheduling tasks from the public API
-- [ ] Per-task options: max attempts, timeout, queue
-- [ ] Backoff jitter to avoid synchronized retry storms
+- [x] Graceful shutdown that drains in-flight tasks
+- [x] `enqueue_in` / `enqueue_at` for scheduling tasks from the public API
+- [x] Per-task options: max attempts, timeout, queue
+- [x] Backoff jitter to avoid synchronized retry storms
 
 ### Durable, distributed backends
 
 - [ ] PostgreSQL broker using `FOR UPDATE SKIP LOCKED` claims and `LISTEN/NOTIFY` wakeups
 - [ ] SQLite broker for single-node durable deployments
-- [ ] Lease expiry with heartbeats, so tasks held by crashed workers are recovered
-- [ ] Dead-letter queue with inspection and requeue
+- [x] Lease expiry with heartbeats, so tasks held by crashed workers are recovered
+- [x] Dead-letter queue with inspection and requeue
 
 ### Robustness
 
 - [ ] Fault-injection test suite covering worker crashes mid-task, broker outages, and network partitions
 - [ ] Deterministic simulation testing of the executor and brokers
 - [ ] Concurrency model checking with [`loom`](https://github.com/tokio-rs/loom)
-- [ ] Unique tasks and deduplication via idempotency keys
-- [ ] Task timeouts and cancellation
+- [x] Unique tasks and deduplication via idempotency keys
+- [x] Task timeouts and cancellation
 - [ ] Per-task-type rate limiting
 
 ### Performance
@@ -226,7 +257,7 @@ The executor reserves a concurrency slot *before* claiming, so a leased task nev
 
 - [ ] Priority and weighted queues
 - [ ] Periodic (cron) tasks
-- [ ] Task result storage
+- [x] Task result storage
 
 ### Operations
 

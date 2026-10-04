@@ -22,8 +22,7 @@ fn throughput(c: &mut Criterion) {
     group.sample_size(20);
 
     for concurrency in [1, 4, 16, 64] {
-        // Engines cannot be shut down yet, so each benchmark reuses one engine across all of its
-        // iterations rather than leaving a running executor behind for every iteration.
+        // One engine per concurrency level, reused across that level's iterations.
         let completions = Arc::new(Completions::default());
         let engine = noop_engine(concurrency, Arc::clone(&completions));
         rt.block_on(async { engine.start() });

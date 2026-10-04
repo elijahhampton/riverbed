@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
-use riverbed::broker::{MemoryBroker, TaskBroker};
-use riverbed::task::Task;
+use riverbed::broker::{ClaimFilter, MemoryBroker, TaskBroker};
+use riverbed::completion::Completion;
+use riverbed::task::TaskSpec;
 use tokio::runtime::Runtime;
 
 const TASK_TYPE: &str = "bench:noop";
@@ -13,8 +14,8 @@ const TASK_TYPE: &str = "bench:noop";
 /// Tasks moved through the broker per measured iteration of the producer benchmark.
 const PRODUCER_BATCH: usize = 10_000;
 
-fn new_task() -> Task {
-    Task::new(TASK_TYPE.to_owned(), serde_json::Value::Null).expect("task creation failed")
+fn new_task() -> TaskSpec {
+    TaskSpec::new(TASK_TYPE.to_owned(), serde_json::Value::Null)
 }
 
 /// One enqueue, claim, and ack at several queue depths. The depth stays constant because each
@@ -37,9 +38,13 @@ fn cycle(c: &mut Criterion) {
             b.to_async(&rt).iter_batched(
                 new_task,
                 move |task| async move {
+                    let filter = ClaimFilter::any();
                     broker.enqueue(task).await.expect("enqueue failed");
-                    let claimed = broker.claim().await.expect("claim failed");
-                    broker.ack(claimed.id).await.expect("ack failed");
+                    let lease = broker.claim(&filter).await.expect("claim failed");
+                    broker
+                        .ack(&lease, Completion::empty())
+                        .await
+                        .expect("ack failed");
                 },
                 BatchSize::SmallInput,
             );
@@ -66,7 +71,7 @@ fn producers(c: &mut Criterion) {
                 let mut elapsed = Duration::ZERO;
                 for _ in 0..iters {
                     // Tasks are built before the clock starts so only broker operations are timed.
-                    let batches: Vec<Vec<Task>> = (0..producer_count)
+                    let batches: Vec<Vec<TaskSpec>> = (0..producer_count)
                         .map(|_| {
                             (0..PRODUCER_BATCH / producer_count)
                                 .map(|_| new_task())
@@ -87,9 +92,13 @@ fn producers(c: &mut Criterion) {
                         })
                         .collect();
 
+                    let filter = ClaimFilter::any();
                     for _ in 0..PRODUCER_BATCH {
-                        let task = broker.claim().await.expect("claim failed");
-                        broker.ack(task.id).await.expect("ack failed");
+                        let lease = broker.claim(&filter).await.expect("claim failed");
+                        broker
+                            .ack(&lease, Completion::empty())
+                            .await
+                            .expect("ack failed");
                     }
                     for handle in handles {
                         handle.await.expect("producer panicked");

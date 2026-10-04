@@ -53,6 +53,14 @@ impl IntoResponse for ApiError {
                     "task not found".to_owned(),
                     StatusCode::INTERNAL_SERVER_ERROR,
                 ),
+                CoreErr::LeaseFenced(_) => (
+                    "task is held by another worker".to_owned(),
+                    StatusCode::CONFLICT,
+                ),
+                CoreErr::TaskNotFound(_) => ("task not found".to_owned(), StatusCode::NOT_FOUND),
+                CoreErr::UnexpectedState { state, .. } => {
+                    (format!("task is {state}"), StatusCode::CONFLICT)
+                }
                 CoreErr::Broker(error) => (error.to_string(), StatusCode::INTERNAL_SERVER_ERROR),
             },
         };

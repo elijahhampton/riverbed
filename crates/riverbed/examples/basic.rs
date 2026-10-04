@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_attempts: 3,
             base_delay: Duration::from_millis(500),
             max_delay: Duration::from_secs(5),
+            jitter: true,
         })
         .register_task(
             SEND_EMAIL.into(),

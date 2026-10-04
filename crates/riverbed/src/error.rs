@@ -23,9 +23,24 @@ pub enum CoreErr {
     #[error("task handler failed")]
     HandlerFailed(#[source] HandlerError),
     /// The broker holds no lease for the task, for example because its outcome was already
-    /// recorded.
+    /// recorded or the lease expired and the task went back to the queue.
     #[error("no lease held for task `{0}`")]
     LeaseNotFound(TaskId),
+    /// The lease expired and the task was granted to another executor. The caller's write was
+    /// rejected rather than applied over the newer lease.
+    #[error("lease on task `{0}` was reclaimed and granted to another executor")]
+    LeaseFenced(TaskId),
+    /// The backend holds no task with this identifier.
+    #[error("no task found with id `{0}`")]
+    TaskNotFound(TaskId),
+    /// The task is not in a state the operation accepts.
+    #[error("task `{id}` is {state}, which this operation does not accept")]
+    UnexpectedState {
+        /// The task the operation was attempted on.
+        id: TaskId,
+        /// The state it was found in.
+        state: &'static str,
+    },
     /// The broker's storage backend failed.
     #[error("broker operation failed")]
     Broker(#[source] Box<dyn std::error::Error + Send + Sync>),
