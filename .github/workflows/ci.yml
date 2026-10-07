@@ -20,7 +20,7 @@ jobs:
     name: fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -30,7 +30,7 @@ jobs:
     name: clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -43,7 +43,7 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -54,7 +54,7 @@ jobs:
     name: feature combinations
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -68,7 +68,7 @@ jobs:
     name: msrv
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Read rust-version from Cargo.toml
         id: msrv
         run: echo "version=$(grep -m1 '^rust-version' Cargo.toml | cut -d '"' -f2)" >> "$GITHUB_OUTPUT"
@@ -87,7 +87,7 @@ jobs:
       # Match the docs.rs build, which uses nightly rustdoc with `--cfg docsrs`.
       RUSTDOCFLAGS: --cfg docsrs -D warnings
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -106,7 +106,7 @@ jobs:
     # A newly published advisory should not block unrelated changes.
     continue-on-error: ${{ matrix.checks == 'advisories' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check ${{ matrix.checks }}
